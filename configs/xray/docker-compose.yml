@@ -1,0 +1,10 @@
+services:
+  xray:
+    image: teddysun/xray:latest
+    container_name: xray
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./config:/etc/xray
+    environment:
+      TZ: UTC
