@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Install Docker and deploy Xray on Iran/Germany servers."""
+"""Deploy simple VLESS+TCP and SOCKS on both servers."""
 
 from __future__ import annotations
 
 import json
-import secrets
-import sys
-import textwrap
 import uuid
 from pathlib import Path
 
@@ -14,14 +11,7 @@ import paramiko
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = ROOT / "secrets" / ".env"
-
-IRAN_DAEMON = """{
-  "registry-mirrors": [
-    "https://docker.iranserver.com",
-    "https://registry.docker.ir"
-  ],
-  "insecure-registries": ["127.0.0.1:5000"]
-}"""
+COMPOSE = ROOT / "configs/xray/docker-compose.yml"
 
 
 def load_env() -> dict[str, str]:
@@ -53,65 +43,30 @@ def run(client: paramiko.SSHClient, cmd: str, timeout: int = 300) -> tuple[int, 
     _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
     out = stdout.read().decode()
     err = stderr.read().decode()
-    code = stdout.channel.recv_exit_status()
-    return code, out, err
+    return stdout.channel.recv_exit_status(), out, err
 
 
-def upload_text(client: paramiko.SSHClient, remote_path: str, content: str) -> None:
+def upload(client: paramiko.SSHClient, path: str, content: str) -> None:
+    run(client, f"mkdir -p {path.rsplit('/', 1)[0]}")
     sftp = client.open_sftp()
-    Path_remote = remote_path.rsplit("/", 1)[0]
-    run(client, f"mkdir -p {Path_remote}")
-    with sftp.file(remote_path, "w") as handle:
+    with sftp.file(path, "w") as handle:
         handle.write(content)
     sftp.close()
 
 
-def ensure_docker(host: str, env: dict[str, str], *, iran: bool) -> None:
+def deploy(host: str, config: str, env: dict[str, str], *, iran: bool) -> None:
     client = ssh(host, env)
-    code, out, _ = run(client, "docker --version 2>/dev/null || echo MISSING")
-    if "MISSING" in out:
-        print(f"[{host}] installing docker...")
-        if iran:
-            run(
-                client,
-                "apt-get update -qq && "
-                "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl gnupg 2>/dev/null",
-            )
-            run(client, "curl -fsSL https://get.docker.com | sh", timeout=600)
-        else:
-            run(client, "curl -fsSL https://get.docker.com | sh", timeout=600)
-    else:
-        print(f"[{host}] docker already installed: {out.strip()}")
+    upload(client, "/opt/xray/docker-compose.yml", COMPOSE.read_text())
+    upload(client, "/opt/xray/config/config.json", config)
 
     if iran:
-        upload_text(client, "/etc/docker/daemon.json", IRAN_DAEMON)
-        run(client, "systemctl enable docker", timeout=60)
-        run(client, "systemctl restart docker", timeout=120)
-
-    code, out, err = run(client, "systemctl is-active docker", timeout=60)
-    print(f"[{host}] docker status:\n{out}{err}")
-    client.close()
-
-
-def deploy_xray(host: str, env: dict[str, str], config: str, *, iran: bool) -> None:
-    client = ssh(host, env)
-    compose = (ROOT / "configs/xray/docker-compose.yml").read_text()
-    run(client, "mkdir -p /opt/xray/config")
-    upload_text(client, "/opt/xray/docker-compose.yml", compose)
-    upload_text(client, "/opt/xray/config/config.json", config)
-
-    if iran:
-        print(f"[{host}] pulling xray image via Iranian mirrors...")
-        code, out, err = run(client, "docker pull teddysun/xray:latest", timeout=600)
-        if code != 0:
-            print(f"[{host}] mirror pull failed, trying direct pull...\n{err}")
-            run(client, "docker pull teddysun/xray:latest", timeout=600)
+        run(client, "docker pull teddysun/xray:latest", timeout=600)
     else:
         run(client, "docker pull teddysun/xray:latest", timeout=600)
 
     run(client, "cd /opt/xray && docker compose down 2>/dev/null; docker compose up -d")
-    code, out, err = run(client, "docker ps --filter name=xray --format '{{.Names}} {{.Status}}'")
-    print(f"[{host}] xray container:\n{out or err}")
+    _, out, err = run(client, "docker ps --filter name=xray --format '{{.Names}} {{.Status}}'; docker logs xray --tail 3 2>&1")
+    print(f"[{host}]\n{out or err}")
     client.close()
 
 
@@ -119,44 +74,50 @@ def main() -> None:
     env = load_env()
     xray_uuid = str(uuid.uuid4())
 
-    server_cfg = (
-        (ROOT / "configs/xray/server.config.json")
+    germany_cfg = (
+        (ROOT / "configs/xray/germany.config.json")
         .read_text()
         .replace("__UUID__", xray_uuid)
+        .replace("__IRAN_HOST__", env["IRAN_HOST"])
     )
-    client_cfg = (
-        (ROOT / "configs/xray/client.config.json")
+    iran_cfg = (
+        (ROOT / "configs/xray/iran.config.json")
         .read_text()
         .replace("__UUID__", xray_uuid)
         .replace("__GERMANY_HOST__", env["GERMANY_HOST"])
     )
 
-    (ROOT / "configs/xray/generated").mkdir(exist_ok=True)
-    (ROOT / "configs/xray/generated/server.config.json").write_text(server_cfg)
-    (ROOT / "configs/xray/generated/client.config.json").write_text(client_cfg)
-    (ROOT / "configs/xray/generated/credentials.json").write_text(
-        json.dumps({"uuid": xray_uuid, "port": 8443}, indent=2)
+    generated = ROOT / "configs/xray/generated"
+    generated.mkdir(exist_ok=True)
+    (generated / "germany.config.json").write_text(germany_cfg)
+    (generated / "iran.config.json").write_text(iran_cfg)
+    (generated / "credentials.json").write_text(
+        json.dumps(
+            {
+                "uuid": xray_uuid,
+                "vless_port": 8443,
+                "socks_port": 1080,
+                "network": "tcp",
+                "tls": False,
+            },
+            indent=2,
+        )
     )
 
-    ensure_docker(env["GERMANY_HOST"], env, iran=False)
-    ensure_docker(env["IRAN_HOST"], env, iran=True)
-    deploy_xray(env["GERMANY_HOST"], env, server_cfg, iran=False)
-    deploy_xray(env["IRAN_HOST"], env, client_cfg, iran=True)
-
-    client = ssh(env["GERMANY_HOST"], env)
-    code, out, err = run(client, "ss -tlnp | grep 8443 || docker logs xray --tail 20")
-    print(f"[germany] port 8443:\n{out}{err}")
-    client.close()
+    deploy(env["GERMANY_HOST"], germany_cfg, env, iran=False)
+    deploy(env["IRAN_HOST"], iran_cfg, env, iran=True)
 
     client = ssh(env["IRAN_HOST"], env)
-    code, out, err = run(
-        client,
-        "curl -s --connect-timeout 5 --socks5-hostname 127.0.0.1:1080 http://ifconfig.me || true",
-    )
-    print(f"[iran] socks test via xray:\n{out}{err}")
+    _, out, _ = run(client, "curl -s --connect-timeout 8 --socks5-hostname 127.0.0.1:1080 http://ifconfig.me")
+    print(f"[iran socks -> germany] {out.strip()}")
     client.close()
 
-    print(f"\nXray UUID: {xray_uuid}")
+    client = ssh(env["GERMANY_HOST"], env)
+    _, out, _ = run(client, "curl -s --connect-timeout 8 --socks5-hostname 127.0.0.1:1080 http://ifconfig.me")
+    print(f"[germany socks -> iran] {out.strip()}")
+    client.close()
+
+    print(f"\nUUID: {xray_uuid}")
 
 
 if __name__ == "__main__":

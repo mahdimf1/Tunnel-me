@@ -1,0 +1,76 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "vless-in",
+      "port": 8443,
+      "listen": "0.0.0.0",
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__UUID__",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp"
+      }
+    },
+    {
+      "tag": "socks-in",
+      "port": 1080,
+      "listen": "127.0.0.1",
+      "protocol": "socks",
+      "settings": {
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "to-iran",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "__IRAN_HOST__",
+            "port": 8443,
+            "users": [
+              {
+                "id": "__UUID__",
+                "encryption": "none",
+                "flow": ""
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp"
+      }
+    },
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["socks-in"],
+        "outboundTag": "to-iran"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["vless-in"],
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}
