@@ -6,26 +6,36 @@
 
 ایجاد تونل/ارتباط پایدار بین **سرور ۱** و **سرور ۲** برای دسترسی به سرویس‌های موردنیاز (مثلاً Docker Registry، SSH، یا سرویس‌های داخلی).
 
+## قانون اصلی
+
+> **همه سرویس‌ها داخل Docker container اجرا می‌شوند** — نه مستقیم روی سرور.
+> جزئیات: [`docs/conventions.md`](docs/conventions.md)
+
 ## وضعیت
 
 | مرحله | وضعیت |
 |-------|--------|
-| انتخاب مخزن GitHub | ✅ انجام شد |
-| دریافت مشخصات سرور ۱ | ⏳ در انتظار |
-| دریافت مشخصات سرور ۲ | ⏳ در انتظار |
-| انتخاب روش تونل (WireGuard / SSH / FRP / ...) | ⏳ در انتظار |
-| پیکربندی و تست اتصال | ⏳ در انتظار |
+| Docker روی هر دو سرور | ✅ |
+| Xray (ایران ↔ آلمان) | ✅ |
+| Docker Registry + tunnel | ✅ |
+| WireGuard | ❌ UDP block |
 
 ## ساختار پروژه
 
 ```
 Tunnel-me/
-├── README.md           # این فایل
+├── README.md
+├── AGENTS.md               # دستورالعمل برای agent
 ├── docs/
-│   ├── servers.md      # مشخصات دو سرور
-│   └── plan.md         # برنامه مرحله‌به‌مرحله
-└── configs/            # فایل‌های کانفیگ (بدون secret)
-    └── .gitkeep
+│   ├── conventions.md      # قوانین container-first
+│   ├── servers.md
+│   ├── plan.md
+│   └── xray.md
+├── configs/
+│   ├── xray/
+│   ├── docker-compose.registry.yml
+│   └── registry-tunnel/
+└── scripts/
 ```
 
 ## مخزن

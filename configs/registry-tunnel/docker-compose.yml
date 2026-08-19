@@ -1,0 +1,21 @@
+services:
+  registry-tunnel:
+    image: alpine:3.20
+    container_name: registry-tunnel
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./ssh:/root/.ssh:ro
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache openssh-client autossh
+        exec autossh -M 0 -N \
+          -o ServerAliveInterval=30 \
+          -o ServerAliveCountMax=3 \
+          -o ExitOnForwardFailure=yes \
+          -o StrictHostKeyChecking=no \
+          -i /root/.ssh/tunnel_id \
+          -L 127.0.0.1:5000:127.0.0.1:5000 \
+          root@91.108.242.106

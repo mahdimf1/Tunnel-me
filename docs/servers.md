@@ -13,7 +13,7 @@
 | SSH | `root@2.144.13.219:22` |
 | Docker | ✅ نصب — mirror ایرانی فعال |
 | Xray | ✅ client — SOCKS `127.0.0.1:1080` |
-| Registry tunnel | ✅ SSH tunnel به آلمان (`127.0.0.1:5000`) |
+| Registry tunnel | ✅ container `registry-tunnel` → `127.0.0.1:5000` |
 
 ## سرور ۲ — آلمان
 
